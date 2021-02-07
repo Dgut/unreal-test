@@ -3,15 +3,31 @@
 #include "CoreMinimal.h"
 #include "Components/MeshComponent.h"
 
+struct FMyVertex
+{
+	uint8 X;
+	uint8 Y;
+	uint8 Z;
+	uint8 AO;
+	/*float X;
+	float Y;
+	float Z;
+	float A;*/
+};
+
 class FMyIndexBuffer : public FIndexBuffer
 {
 public:
+	TArray<uint16> Indices;
+
 	virtual void InitRHI() override;
 };
 
 class FMyVertexBuffer : public FVertexBuffer
 {
 public:
+	TArray<FMyVertex> Vertices;
+
 	FShaderResourceViewRHIRef PositionComponentSRV;
 
 	virtual void InitRHI() override;
@@ -40,6 +56,8 @@ class FMyPrimitiveSceneProxy : public FPrimitiveSceneProxy
 	//FMyTangentBuffer TangentBuffer;
 	//FStaticMeshVertexBuffers VertexBuffers;
 	FLocalVertexFactory VertexFactory;
+
+	void FillBuffers();
 public:
 	FMyPrimitiveSceneProxy(UMyMeshComponent* Component);
 

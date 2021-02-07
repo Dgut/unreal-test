@@ -21,22 +21,14 @@ static const uint8 GlobalFaceVertices[6][4] =
 	{ 1, 3, 7, 5 }		// +Z
 };
 
-static TArray<int32> GlobalIndices = { 0, 1, 2, 0, 2, 3 };
-static TArray<FVector> GlobalVertices = {
-	FVector(0, 0, 0),
-	FVector(0, 1, 0),
-	FVector(0, 1, 1),
-	FVector(0, 0, 1),
-};
-
-static const FIntVector GlobalFaceNormals[6] =
+const FIntVector GlobalFaceNormals[6] =
 {
 	FIntVector(-1, 0, 0),
-	FIntVector(+1, 0, 0),
+	FIntVector(1, 0, 0),
 	FIntVector(0, -1, 0),
-	FIntVector(0, +1, 0),
+	FIntVector(0, 1, 0),
 	FIntVector(0, 0, -1),
-	FIntVector(0, 0, +1),
+	FIntVector(0, 0, 1),
 };
 
 TGlobalResource<FMyTangentBuffer> GlobalTangentBuffer;
@@ -44,23 +36,23 @@ TGlobalResource<FMyTangentBuffer> GlobalTangentBuffer;
 void FMyIndexBuffer::InitRHI()
 {
 	FRHIResourceCreateInfo CreateInfo;
-	IndexBufferRHI = RHICreateIndexBuffer(sizeof(int32), GlobalIndices.Num() * sizeof(int32), BUF_Dynamic, CreateInfo);
+	IndexBufferRHI = RHICreateIndexBuffer(sizeof(uint16), Indices.Num() * sizeof(uint16), BUF_Dynamic, CreateInfo);
 
-	void* IndexBufferData = RHILockIndexBuffer(IndexBufferRHI, 0, GlobalIndices.Num() * sizeof(int32), RLM_WriteOnly);
-	FMemory::Memcpy(IndexBufferData, &GlobalIndices[0], GlobalIndices.Num() * sizeof(int32));
+	void* IndexBufferData = RHILockIndexBuffer(IndexBufferRHI, 0, Indices.Num() * sizeof(uint16), RLM_WriteOnly);
+	FMemory::Memcpy(IndexBufferData, &Indices[0], Indices.Num() * sizeof(uint16));
 	RHIUnlockIndexBuffer(IndexBufferRHI);
 }
 
 void FMyVertexBuffer::InitRHI()
 {
 	FRHIResourceCreateInfo CreateInfo;
-	VertexBufferRHI = RHICreateVertexBuffer(GlobalVertices.Num() * sizeof(FVector), BUF_Dynamic | BUF_ShaderResource, CreateInfo);
+	VertexBufferRHI = RHICreateVertexBuffer(Vertices.Num() * sizeof(FMyVertex), BUF_Dynamic | BUF_ShaderResource, CreateInfo);
 
-	void* VertexBufferData = RHILockVertexBuffer(VertexBufferRHI, 0, GlobalVertices.Num() * sizeof(FVector), RLM_WriteOnly);
-	FMemory::Memcpy(VertexBufferData, &GlobalVertices[0], GlobalVertices.Num() * sizeof(FVector));
+	void* VertexBufferData = RHILockVertexBuffer(VertexBufferRHI, 0, Vertices.Num() * sizeof(FMyVertex), RLM_WriteOnly);
+	FMemory::Memcpy(VertexBufferData, &Vertices[0], Vertices.Num() * sizeof(FMyVertex));
 	RHIUnlockVertexBuffer(VertexBufferRHI);
 
-	PositionComponentSRV = RHICreateShaderResourceView(FShaderResourceViewInitializer(VertexBufferRHI, PF_R32_FLOAT));
+	PositionComponentSRV = RHICreateShaderResourceView(VertexBufferRHI, sizeof(uint8), PF_G8);/*RHICreateShaderResourceView(FShaderResourceViewInitializer(VertexBufferRHI, PF_R32_FLOAT));*/
 }
 
 void FMyVertexBuffer::ReleaseRHI()
@@ -97,37 +89,46 @@ void FMyTangentBuffer::ReleaseRHI()
 
 //---------------------------------------------------------------------------
 
+void FMyPrimitiveSceneProxy::FillBuffers()
+{
+	VertexBuffer.Vertices.Add({ 0, 0, 0 });
+	VertexBuffer.Vertices.Add({ 0, 1, 0 });
+	VertexBuffer.Vertices.Add({ 0, 1, 1 });
+	VertexBuffer.Vertices.Add({ 0, 0, 1 });
+
+	IndexBuffer.Indices.Add(0);
+	IndexBuffer.Indices.Add(1);
+	IndexBuffer.Indices.Add(2);
+
+	IndexBuffer.Indices.Add(0);
+	IndexBuffer.Indices.Add(2);
+	IndexBuffer.Indices.Add(3);
+}
+
 FMyPrimitiveSceneProxy::FMyPrimitiveSceneProxy(UMyMeshComponent* Component) :
 	FPrimitiveSceneProxy(Component),
 	Material(nullptr),
 	VertexFactory(GetScene().GetFeatureLevel(), "FMyPrimitiveSceneProxy")
 {
-	//VertexBuffers.InitWithDummyData(&VertexFactory, GlobalVertices.Num());
+	FillBuffers();
 
 	BeginInitResource(&IndexBuffer);
 	BeginInitResource(&VertexBuffer);
-	//BeginInitResource(&TangentBuffer);
 
 	ENQUEUE_RENDER_COMMAND(FMyPrimitiveSceneProxy_Init)(
 		[this](FRHICommandListImmediate& RHICmdList)
 		{
 			FLocalVertexFactory::FDataType Data;
 			
-			Data.PositionComponent = FVertexStreamComponent(&VertexBuffer, 0, sizeof(FVector), VET_Float3);
+			Data.PositionComponent = FVertexStreamComponent(&VertexBuffer, 0, sizeof(FMyVertex), VET_UByte4N);
 			Data.PositionComponentSRV = VertexBuffer.PositionComponentSRV;
+
+			Data.TextureCoordinates.Add(FVertexStreamComponent(&VertexBuffer, 0, sizeof(FMyVertex), VET_UByte4N, EVertexStreamUsage::ManualFetch));
+			Data.TextureCoordinatesSRV = VertexBuffer.PositionComponentSRV;
 
 			Data.TangentBasisComponents[0] = FVertexStreamComponent(&GlobalTangentBuffer, sizeof(FPackedNormal) * (2 * 0 + 0), 0, VET_PackedNormal, EVertexStreamUsage::ManualFetch);
 			Data.TangentBasisComponents[1] = FVertexStreamComponent(&GlobalTangentBuffer, sizeof(FPackedNormal) * (2 * 0 + 1), 0, VET_PackedNormal, EVertexStreamUsage::ManualFetch);
 			Data.TangentsSRV = VertexBuffer.PositionComponentSRV;
-
-			Data.TextureCoordinates.Add(FVertexStreamComponent(&VertexBuffer, 0, sizeof(FVector), VET_Float2, EVertexStreamUsage::ManualFetch));
-			Data.TextureCoordinatesSRV = VertexBuffer.PositionComponentSRV;
-
-			/*Data.LightMapCoordinateComponent = FVertexStreamComponent(&VertexBuffer, 0, sizeof(FVector), VET_Float2, EVertexStreamUsage::ManualFetch);
-			Data.TextureCoordinatesSRV = VertexBuffer.PositionComponentSRV;
-
-			Data.ColorComponent = FVertexStreamComponent(&VertexBuffer, 0, sizeof(FVector), VET_Color, EVertexStreamUsage::ManualFetch);
-			Data.ColorComponentsSRV = VertexBuffer.PositionComponentSRV;*/
 
 			VertexFactory.SetData(Data);
 		});
@@ -145,65 +146,12 @@ FMyPrimitiveSceneProxy::~FMyPrimitiveSceneProxy()
 {
 	IndexBuffer.ReleaseResource();
 	VertexBuffer.ReleaseResource();
-	//TangentBuffer.ReleaseResource();
-	/*VertexBuffers.PositionVertexBuffer.ReleaseResource();
-	VertexBuffers.StaticMeshVertexBuffer.ReleaseResource();
-	VertexBuffers.ColorVertexBuffer.ReleaseResource();*/
 	VertexFactory.ReleaseResource();
 }
 
 void FMyPrimitiveSceneProxy::SetDynamicData_RenderThread()
 {
 	check(IsInRenderingThread());
-
-	/*for (int i = 0; i < GlobalVertices.Num(); i++)
-	{
-		const FDynamicMeshVertex Vertex = GlobalVertices[i];
-
-		VertexBuffers.PositionVertexBuffer.VertexPosition(i) = Vertex.Position;
-		VertexBuffers.StaticMeshVertexBuffer.SetVertexTangents(i, Vertex.TangentX.ToFVector(), Vertex.GetTangentY(), Vertex.TangentZ.ToFVector());
-		VertexBuffers.StaticMeshVertexBuffer.SetVertexUV(i, 0, Vertex.TextureCoordinate[0]);
-		VertexBuffers.ColorVertexBuffer.VertexColor(i) = Vertex.Color;
-	}
-
-	{
-		auto& VB = VertexBuffers.PositionVertexBuffer;
-		void* VertexBufferData = RHILockVertexBuffer(VB.VertexBufferRHI, 0, VB.GetNumVertices() * VB.GetStride(), RLM_WriteOnly);
-		FMemory::Memcpy(VertexBufferData, VB.GetVertexData(), VB.GetNumVertices() * VB.GetStride());
-		RHIUnlockVertexBuffer(VB.VertexBufferRHI);
-	}
-
-	{
-		auto& VB = VertexBuffers.ColorVertexBuffer;
-		void* VertexBufferData = RHILockVertexBuffer(VB.VertexBufferRHI, 0, VB.GetNumVertices() * VB.GetStride(), RLM_WriteOnly);
-		FMemory::Memcpy(VertexBufferData, VB.GetVertexData(), VB.GetNumVertices() * VB.GetStride());
-		RHIUnlockVertexBuffer(VB.VertexBufferRHI);
-	}
-
-	{
-		auto& VB = VertexBuffers.StaticMeshVertexBuffer;
-		void* VertexBufferData = RHILockVertexBuffer(VB.TangentsVertexBuffer.VertexBufferRHI, 0, VB.GetTangentSize(), RLM_WriteOnly);
-		FMemory::Memcpy(VertexBufferData, VB.GetTangentData(), VB.GetTangentSize());
-		RHIUnlockVertexBuffer(VB.TangentsVertexBuffer.VertexBufferRHI);
-	}
-
-	{
-		auto& VB = VertexBuffers.StaticMeshVertexBuffer;
-		void* VertexBufferData = RHILockVertexBuffer(VB.TexCoordVertexBuffer.VertexBufferRHI, 0, VB.GetTexCoordSize(), RLM_WriteOnly);
-		FMemory::Memcpy(VertexBufferData, VB.GetTexCoordData(), VB.GetTexCoordSize());
-		RHIUnlockVertexBuffer(VB.TexCoordVertexBuffer.VertexBufferRHI);
-	}*/
-
-	/*{
-		auto& VB = VertexBuffer;
-		void* VertexBufferData = RHILockVertexBuffer(VB.VertexBufferRHI, 0, GlobalVertices.Num() * sizeof(FVector), RLM_WriteOnly);
-		FMemory::Memcpy(VertexBufferData, &GlobalVertices[0], GlobalVertices.Num() * sizeof(FVector));
-		RHIUnlockVertexBuffer(VB.VertexBufferRHI);
-	}*/
-
-	/*void* IndexBufferData = RHILockIndexBuffer(IndexBuffer.IndexBufferRHI, 0, GlobalIndices.Num() * sizeof(int32), RLM_WriteOnly);
-	FMemory::Memcpy(IndexBufferData, &GlobalIndices[0], GlobalIndices.Num() * sizeof(int32));
-	RHIUnlockIndexBuffer(IndexBuffer.IndexBufferRHI);*/
 }
 
 FPrimitiveViewRelevance FMyPrimitiveSceneProxy::GetViewRelevance(const FSceneView* View) const
@@ -257,13 +205,13 @@ void FMyPrimitiveSceneProxy::GetDynamicMeshElements(const TArray<const FSceneVie
 			GetScene().GetPrimitiveUniformShaderParameters_RenderThread(GetPrimitiveSceneInfo(), bHasPrecomputedVolumetricLightmap, PreviousLocalToWorld, SingleCaptureIndex, bOutputVelocity);
 
 			FDynamicPrimitiveUniformBuffer& DynamicPrimitiveUniformBuffer = Collector.AllocateOneFrameResource<FDynamicPrimitiveUniformBuffer>();
-			DynamicPrimitiveUniformBuffer.Set(FScaleMatrix(FVector(255, 255, 255)) * GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, DrawsVelocity(), bOutputVelocity);
+			DynamicPrimitiveUniformBuffer.Set(FScaleMatrix(FVector::OneVector * 255 * 100) * GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, DrawsVelocity(), bOutputVelocity);
 			BatchElement.PrimitiveUniformBufferResource = &DynamicPrimitiveUniformBuffer.UniformBuffer;
 
 			BatchElement.FirstIndex = 0;
-			BatchElement.NumPrimitives = GlobalIndices.Num() / 3;
+			BatchElement.NumPrimitives = IndexBuffer.Indices.Num() / 3;
 			BatchElement.MinVertexIndex = 0;
-			BatchElement.MaxVertexIndex = GlobalVertices.Num() - 1;
+			BatchElement.MaxVertexIndex = VertexBuffer.Vertices.Num() - 1;
 			Mesh.ReverseCulling = IsLocalToWorldDeterminantNegative();
 			Mesh.Type = PT_TriangleList;
 			Mesh.DepthPriorityGroup = SDPG_World;
@@ -271,43 +219,4 @@ void FMyPrimitiveSceneProxy::GetDynamicMeshElements(const TArray<const FSceneVie
 			Collector.AddMesh(ViewIndex, Mesh);
 		}
 	}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-	/*TArray<uint32> Indices;
-	TArray<FDynamicMeshVertex> Vertices;
-
-	Vertices.Add(FVector(100, 0, 0));
-	Vertices.Add(FVector(0, 100, 0));
-	Vertices.Add(FVector(0, 0, 100));
-	Indices.Add(0);
-	Indices.Add(1);
-	Indices.Add(2);
-
-	for (int32 ViewIndex = 0; ViewIndex < Views.Num(); ViewIndex++)
-	{
-		if (VisibilityMap & (1 << ViewIndex))
-		{
-			FDynamicMeshBuilder MeshBuilder(Views[ViewIndex]->GetFeatureLevel());
-
-			MeshBuilder.AddVertices(Vertices);
-			MeshBuilder.AddTriangles(Indices);
-			
-			MeshBuilder.GetMesh(GetLocalToWorld(), new FColoredMaterialRenderProxy(Material->GetRenderProxy(), FLinearColor::Red), GetDepthPriorityGroup(Views[ViewIndex]), true, true, ViewIndex, Collector);
-
-			FMeshBatch& Mesh = Collector.AllocateMesh();
-			FMeshBatchElement& BatchElement = Mesh.Elements[0];
-		}
-	}*/
 }
